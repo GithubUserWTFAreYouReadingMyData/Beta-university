@@ -1,0 +1,1426 @@
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.io.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+import java.util.PriorityQueue;
+import java.util.Comparator;
+import java.util.Collections;
+
+// 1. Main
+class Main {
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            JFrame frame = new JFrame("Simulatore di Microrobot nel Labirinto");
+            frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            frame.add(new RegistrazionePanel(frame));
+            frame.pack();
+            frame.setLocationRelativeTo(null);
+            frame.setVisible(true);
+        });
+    }
+}
+
+// 2. Labirinto
+class Labirinto implements Serializable {
+
+    private int[][] griglia; // Matrice che rappresenta il labirinto
+    private int ingressoX, ingressoY; // Coordinate della porta d'ingresso
+    private int uscitaX, uscitaY; // Coordinate della porta d'uscita
+    private List<Botola> botole; // Lista delle botole presenti
+    private List<Microrobot> microrobot; // Lista dei microrobot
+    private int numBotole; // Numero di botole
+
+    /**
+     * Costruttore per inizializzare il labirinto con dimensioni e ingressi/uscite.
+     *
+     * @param larghezza larghezza del labirinto
+     * @param altezza   altezza del labirinto
+     * @param numBotole   numero di botole
+     */
+    public Labirinto(int larghezza, int altezza, int numBotole) {
+        this.griglia = new int[larghezza][altezza];
+        this.botole = new ArrayList<>();
+        this.microrobot = new ArrayList<>();
+        this.numBotole = numBotole;
+        // Valori iniziali di default per ingresso e uscita
+        this.ingressoX = 0;
+        this.ingressoY = 0;
+        this.uscitaX = larghezza - 1;
+        this.uscitaY = altezza - 1;
+    }
+
+    /**
+     * Inizializza uno scenario specifico.
+     *
+     * @param livello livello di difficoltà
+     */
+    public void inizializzaScenario(int livello) {
+        // Esempio base: riempie la griglia con pareti e posizioni vuote
+        // Livello può determinare la complessità del layout
+        System.out.println("Inizializzazione scenario di livello: " + livello);
+        Random random = new Random();
+
+        // Inizializza tutto a vuoto (0)
+        for (int i = 0; i < griglia.length; i++) {
+            for (int j = 0; j < griglia[0].length; j++) {
+                griglia[i][j] = 0;
+            }
+        }
+
+        // Aggiungi muri in modo casuale ma con i vincoli
+        for (int i = 0; i < griglia.length; i++) {
+            for (int j = 0; j < griglia[0].length; j++) {
+                // Non mettere muri sull'ingresso e sull'uscita
+                if ((i == ingressoX && j == ingressoY) || (i == uscitaX && j == uscitaY)) continue;
+
+                if (random.nextDouble() < 0.3) { // Probabilità di aggiungere un muro (30%)
+                    // Controlla vincoli
+                    if (contaMuriAdiacenti(i, j) <= 2 && !bloccaUscita(i, j)) {
+                        griglia[i][j] = 1; // 1 rappresenta un muro
+                    }
+                }
+            }
+        }
+        // Posiziona le botole
+        posizionaBotole();
+    }
+    // Conta i muri adiacenti in orizzontale e verticale
+    private int contaMuriAdiacenti(int riga, int colonna) {
+        int conta = 0;
+        // Controlla sopra
+        if (riga > 0 && griglia[riga - 1][colonna] == 1) conta++;
+        // Controlla sotto
+        if (riga < griglia.length - 1 && griglia[riga + 1][colonna] == 1) conta++;
+        // Controlla a sinistra
+        if (colonna > 0 && griglia[riga][colonna - 1] == 1) conta++;
+        // Controlla a destra
+        if (colonna < griglia[0].length - 1 && griglia[riga][colonna + 1] == 1) conta++;
+        return conta;
+    }
+
+    // Verifica se posizionare un muro blocca il percorso verso l'uscita
+    private boolean bloccaUscita(int riga, int colonna) {
+        // Crea una copia temporanea della griglia per simulare l'aggiunta del muro
+        int[][] grigliaTemp = new int[griglia.length][griglia[0].length];
+        for (int i = 0; i < griglia.length; i++) {
+            System.arraycopy(griglia[i], 0, grigliaTemp[i], 0, griglia[0].length);
+        }
+
+        // Simula l'aggiunta del muro
+        grigliaTemp[riga][colonna] = 1;
+
+        // Usa un algoritmo di ricerca (es. BFS o DFS) per vedere se c'è un percorso dall'ingresso all'uscita
+        return !esistePercorso(grigliaTemp, ingressoX, ingressoY, uscitaX, uscitaY);
+    }
+
+    // Implementazione di un semplice algoritmo di ricerca (BFS) per verificare l'esistenza di un percorso
+    private boolean esistePercorso(int[][] griglia, int startX, int startY, int endX, int endY) {
+        boolean[][] visitato = new boolean[griglia.length][griglia[0].length];
+        List<Point> coda = new ArrayList<>();
+        coda.add(new Point(startX, startY));
+        visitato[startX][startY] = true;
+
+        int[] dx = {-1, 1, 0, 0}; // Spostamenti nelle 4 direzioni: su, giù, sinistra, destra
+        int[] dy = {0, 0, -1, 1};
+
+        while (!coda.isEmpty()) {
+            Point corrente = coda.remove(0);
+
+            if (corrente.x == endX && corrente.y == endY) {
+                return true; // Percorso trovato
+            }
+
+            for (int i = 0; i < 4; i++) {
+                int nuovoX = corrente.x + dx[i];
+                int nuovoY = corrente.y + dy[i];
+
+                if (nuovoX >= 0 && nuovoX < griglia.length &&
+                        nuovoY >= 0 && nuovoY < griglia[0].length &&
+                        griglia[nuovoX][nuovoY] == 0 && !visitato[nuovoX][nuovoY]) {
+                    coda.add(new Point(nuovoX, nuovoY));
+                    visitato[nuovoX][nuovoY] = true;
+                }
+            }
+        }
+
+        return false; // Nessun percorso trovato
+    }
+
+    private void posizionaBotole() {
+        Random random = new Random();
+        for (int i = 0; i < numBotole; i++) {
+            int x, y;
+            do {
+                x = random.nextInt(griglia.length);
+                y = random.nextInt(griglia[0].length);
+            } while (griglia[x][y] == 1 || (x == ingressoX && y == ingressoY) || (x == uscitaX && y == uscitaY)); // Evita muri e ingresso/uscita
+
+            botole.add(new Botola(x, y));
+        }
+    }
+
+    /**
+     * Sposta un microrobot in una direzione specifica, gestendo anche il caso in cui il robot sia bloccato.
+     *
+     * @param robot il microrobot da spostare
+     * @param dir   la direzione di movimento
+     */
+    public void spostaMicrorobot(Microrobot robot, Direzione dir) {
+        int nuovoX = robot.getX() + dir.getDeltaX();
+        int nuovoY = robot.getY() + dir.getDeltaY();
+
+        // Controlla se la nuova posizione è valida
+        if (nuovoX >= 0 && nuovoX < griglia.length &&
+                nuovoY >= 0 && nuovoY < griglia[0].length &&
+                griglia[nuovoX][nuovoY] != 1) {
+            // Controlla se c'è una botola nella nuova posizione
+            for (Botola botola : botole) {
+                if (botola.getX() == nuovoX && botola.getY() == nuovoY) {
+                    botola.attiva(robot, this);
+                    return;
+                }
+            }
+
+            // Se non ci sono botole, sposta il robot normalmente
+            robot.setX(nuovoX);
+            robot.setY(nuovoY);
+        } else {
+            // Se il robot è bloccato, prova a farlo muovere in una direzione alternativa
+            spostaInDirezioneAlternativa(robot, dir);
+        }
+    }
+
+    /**
+     * Tenta di spostare il microrobot in una direzione alternativa se la direzione originale è bloccata.
+     *
+     * @param robot il microrobot da spostare
+     * @param dir   la direzione originale bloccata
+     */
+    private void spostaInDirezioneAlternativa(Microrobot robot, Direzione dir) {
+        // Lista di direzioni alternative in ordine di priorità
+        List<Direzione> direzioniAlternative = new ArrayList<>();
+        switch (dir) {
+            case NORD:
+            case SUD:
+                direzioniAlternative.add(Direzione.EST);
+                direzioniAlternative.add(Direzione.OVEST);
+                direzioniAlternative.add(dir == Direzione.NORD ? Direzione.SUD : Direzione.NORD);
+                break;
+            case EST:
+            case OVEST:
+                direzioniAlternative.add(Direzione.NORD);
+                direzioniAlternative.add(Direzione.SUD);
+                direzioniAlternative.add(dir == Direzione.EST ? Direzione.OVEST : Direzione.EST);
+                break;
+            default:
+                // Se la direzione originale è diagonale, prova prima le direzioni cardinali
+                direzioniAlternative.add(Direzione.NORD);
+                direzioniAlternative.add(Direzione.SUD);
+                direzioniAlternative.add(Direzione.EST);
+                direzioniAlternative.add(Direzione.OVEST);
+                break;
+        }
+
+        // Prova a spostare il robot in una delle direzioni alternative
+        for (Direzione dirAlt : direzioniAlternative) {
+            int nuovoX = robot.getX() + dirAlt.getDeltaX();
+            int nuovoY = robot.getY() + dirAlt.getDeltaY();
+            if (nuovoX >= 0 && nuovoX < griglia.length &&
+                    nuovoY >= 0 && nuovoY < griglia[0].length &&
+                    griglia[nuovoX][nuovoY] != 1) {
+                robot.setX(nuovoX);
+                robot.setY(nuovoY);
+                System.out.println("Robot " + robot.getId() + " è stato spostato in direzione alternativa: " + dirAlt);
+                return;
+            }
+        }
+
+        System.out.println("Robot " + robot.getId() + " è bloccato e non può muoversi in nessuna direzione.");
+    }
+
+    /**
+     * Verifica se un microrobot ha raggiunto l'uscita.
+     *
+     * @param robot il microrobot da verificare
+     * @return true se il robot ha raggiunto l'uscita, false altrimenti
+     */
+    public boolean verificaUscita(Microrobot robot) {
+        return robot.getX() == uscitaX && robot.getY() == uscitaY;
+    }
+
+    // Getter e setter per gli attributi
+    public int[][] getGriglia() {
+        return griglia;
+    }
+
+    public int getIngressoX() {
+        return ingressoX;
+    }
+    public int getIngressoY() {
+        return ingressoY;
+    }
+    public int getUscitaX() {
+        return uscitaX;
+    }
+    public int getUscitaY() {
+        return uscitaY;
+    }
+    public List<Botola> getBotole(){
+        return botole;
+    }
+    public List<Microrobot> getMicrorobot(){
+        return microrobot;
+    }
+}
+
+// 3. Microrobot
+class Microrobot {
+
+    private int id; // Identificativo univoco
+    private int x, y; // Coordinate attuali
+    private boolean uscito; // Flag per verificare se il robot ha raggiunto l'uscita
+
+    /**
+     * Costruttore per inizializzare il microrobot.
+     *
+     * @param id identificativo univoco del robot
+     * @param x  coordinata X iniziale
+     * @param y  coordinata Y iniziale
+     */
+    public Microrobot(int id, int x, int y) {
+        this.id = id;
+        this.x = x;
+        this.y = y;
+        this.uscito = false;
+    }
+
+    /**
+     * Muove il microrobot in una direzione specifica.
+     *
+     * @param dir direzione di movimento
+     */
+    public void muovi(Direzione dir) {
+        this.x += dir.getDeltaX();
+        this.y += dir.getDeltaY();
+    }
+
+    /**
+     * Resetta la posizione del microrobot.
+     *
+     * @param x nuova coordinata X
+     * @param y nuova coordinata Y
+     */
+    public void reset(int x, int y) {
+        this.x = x;
+        this.y = y;
+        this.uscito = false;
+    }
+
+    // Getter e setter
+    public int getId() {
+        return id;
+    }
+
+    public int getX() {
+        return x;
+    }
+
+    public void setX(int x) {
+        this.x = x;
+    }
+
+    public int getY() {
+        return y;
+    }
+
+    public void setY(int y) {
+        this.y = y;
+    }
+
+    public boolean isUscito() {
+        return uscito;
+    }
+
+    public void setUscito(boolean uscito) {
+        this.uscito = uscito;
+    }
+}
+
+// 4. Botola
+class Botola implements Serializable{
+
+    private int x; // Coordinata X della botola
+    private int y; // Coordinata Y della botola
+
+    /**
+     * Costruttore per inizializzare la botola.
+     *
+     * @param x coordinata X della botola
+     * @param y coordinata Y della botola
+     */
+    public Botola(int x, int y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    /**
+     * Attiva la botola, spostando un microrobot in una posizione casuale del labirinto.
+     *
+     * @param robot     il microrobot da spostare
+     * @param labirinto il labirinto in cui si trova il robot
+     */
+    public void attiva(Microrobot robot, Labirinto labirinto) {
+        Random random = new Random();
+        int nuovaX, nuovaY;
+        do {
+            nuovaX = random.nextInt(labirinto.getGriglia().length);
+            nuovaY = random.nextInt(labirinto.getGriglia()[0].length);
+            // Assicurati che la nuova posizione non sia una parete (1), l'ingresso o l'uscita
+        } while (labirinto.getGriglia()[nuovaX][nuovaY] == 1 ||
+                (nuovaX == labirinto.getIngressoX() && nuovaY == labirinto.getIngressoY()) ||
+                (nuovaX == labirinto.getUscitaX() && nuovaY == labirinto.getUscitaY()));
+
+        // Sposta il robot
+        robot.setX(nuovaX);
+        robot.setY(nuovaY);
+        System.out.println("Botola attivata! Robot " + robot.getId() + " spostato a (" + nuovaX + ", " + nuovaY + ").");
+    }
+
+    // Getter e setter
+    public int getX() {
+        return x;
+    }
+
+    public void setX(int x) {
+        this.x = x;
+    }
+
+    public int getY() {
+        return y;
+    }
+
+    public void setY(int y) {
+        this.y = y;
+    }
+}
+
+// 5. Algoritmo A*
+class AStar {
+    private Labirinto labirinto;
+    private PriorityQueue<Nodo> frontiera;
+    private List<Nodo> esplorati;
+
+    public AStar(Labirinto labirinto) {
+        this.labirinto = labirinto;
+        this.frontiera = new PriorityQueue<>(Comparator.comparingInt(Nodo::getCostoTotale));
+        this.esplorati = new ArrayList<>();
+    }
+
+    public List<Direzione> trovaPercorso(Microrobot robot) {
+        frontiera.clear();
+        esplorati.clear();
+
+        Nodo nodoIniziale = new Nodo(robot.getX(), robot.getY(), 0, calcolaEuristica(robot.getX(), robot.getY()), null, null);
+        frontiera.add(nodoIniziale);
+
+        while (!frontiera.isEmpty()) {
+            Nodo nodoCorrente = frontiera.poll();
+            esplorati.add(nodoCorrente);
+
+            if (labirinto.verificaUscita(new Microrobot(-1, nodoCorrente.getX(), nodoCorrente.getY()))) {
+                return ricostruisciPercorso(nodoCorrente);
+            }
+
+            for (Direzione direzione : Direzione.values()) {
+                int nuovoX = nodoCorrente.getX() + direzione.getDeltaX();
+                int nuovoY = nodoCorrente.getY() + direzione.getDeltaY();
+
+                if (nuovoX >= 0 && nuovoX < labirinto.getGriglia().length &&
+                        nuovoY >= 0 && nuovoY < labirinto.getGriglia()[0].length &&
+                        labirinto.getGriglia()[nuovoX][nuovoY] != 1) {
+
+                    Nodo vicino = new Nodo(nuovoX, nuovoY, nodoCorrente.getCostoEffettivo() + 1, calcolaEuristica(nuovoX, nuovoY), nodoCorrente, direzione);
+
+                    if (!esplorati.contains(vicino)) {
+                        boolean inFrontiera = false;
+                        for (Nodo n : frontiera) {
+                            if (n.equals(vicino) && n.getCostoTotale() <= vicino.getCostoTotale()) {
+                                inFrontiera = true;
+                                break;
+                            }
+                        }
+                        if (!inFrontiera) {
+                            frontiera.add(vicino);
+                        }
+                    }
+                }
+            }
+        }
+
+        return null; // Nessun percorso trovato
+    }
+
+    private int calcolaEuristica(int x, int y) {
+        // Distanza di Manhattan
+        return Math.abs(x - labirinto.getUscitaX()) + Math.abs(y - labirinto.getUscitaY());
+    }
+
+    private List<Direzione> ricostruisciPercorso(Nodo nodoFinale) {
+        List<Direzione> percorso = new ArrayList<>();
+        Nodo nodoCorrente = nodoFinale;
+
+        while (nodoCorrente.getPadre() != null) {
+            percorso.add(0, nodoCorrente.getDirezione());
+            nodoCorrente = nodoCorrente.getPadre();
+        }
+
+        return percorso;
+    }
+
+    private static class Nodo {
+        private int x;
+        private int y;
+        private int costoEffettivo;
+        private int costoEuristico;
+        private Nodo padre;
+        private Direzione direzione;
+
+        public Nodo(int x, int y, int costoEffettivo, int costoEuristico, Nodo padre, Direzione direzione) {
+            this.x = x;
+            this.y = y;
+            this.costoEffettivo = costoEffettivo;
+            this.costoEuristico = costoEuristico;
+            this.padre = padre;
+            this.direzione = direzione;
+        }
+
+        public int getX() {
+            return x;
+        }
+
+        public int getY() {
+            return y;
+        }
+
+        public int getCostoEffettivo() {
+            return costoEffettivo;
+        }
+
+        public int getCostoTotale() {
+            return costoEffettivo + costoEuristico;
+        }
+
+        public Nodo getPadre() {
+            return padre;
+        }
+
+        public Direzione getDirezione() {
+            return direzione;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (obj == null || getClass() != obj.getClass()) return false;
+            Nodo nodo = (Nodo) obj;
+            return x == nodo.x && y == nodo.y;
+        }
+
+        @Override
+        public int hashCode() {
+            return x * 31 + y;
+        }
+    }
+}
+
+// 6. MovimentoMicrorobot
+class MovimentoMicrorobot {
+
+    private Labirinto labirinto; // Riferimento al labirinto
+
+    /**
+     * Costruttore per inizializzare il gestore di movimento.
+     *
+     * @param labirinto il labirinto in cui si muovono i robot
+     */
+    public MovimentoMicrorobot(Labirinto labirinto) {
+        this.labirinto = labirinto;
+    }
+
+    /**
+     * Esegue la mossa del microrobot in una direzione specifica.
+     *
+     * @param robot il microrobot da spostare
+     * @param dir   la direzione del movimento
+     */
+    public void eseguiMossa(Microrobot robot, Direzione dir) {
+        labirinto.spostaMicrorobot(robot, dir);
+    }
+}
+
+// 7. Direzione
+enum Direzione {
+    NORD(-1, 0),
+    SUD(1, 0),
+    EST(0, 1),
+    OVEST(0, -1),
+    NORD_EST(-1, 1),
+    NORD_OVEST(-1, -1),
+    SUD_EST(1, 1),
+    SUD_OVEST(1, -1);
+
+    private final int deltaX; // Variazione sulla coordinata X
+    private final int deltaY; // Variazione sulla coordinata Y
+
+    /**
+     * Costruttore per inizializzare i delta delle direzioni.
+     *
+     * @param deltaX variazione sulla coordinata X
+     * @param deltaY variazione sulla coordinata Y
+     */
+    Direzione(int deltaX, int deltaY) {
+        this.deltaX = deltaX;
+        this.deltaY = deltaY;
+    }
+
+    /**
+     * Restituisce la variazione sulla coordinata X.
+     *
+     * @return deltaX
+     */
+    public int getDeltaX() {
+        return deltaX;
+    }
+
+    /**
+     * Restituisce la variazione sulla coordinata Y.
+     *
+     * @return deltaY
+     */
+    public int getDeltaY() {
+        return deltaY;
+    }
+}
+
+// 8. Utente
+class Utente implements Serializable {
+
+    private String nome; // Nome dell'utente
+    private String cognome; // Cognome dell'utente
+    private List<RisultatoPartita> risultati; // Lista dei risultati ottenuti dall'utente
+
+    /**
+     * Costruttore per creare un nuovo utente.
+     *
+     * @param nome    nome dell'utente
+     * @param cognome cognome dell'utente
+     */
+    public Utente(String nome, String cognome) {
+        this.nome = nome;
+        this.cognome = cognome;
+        this.risultati = new ArrayList<>();
+    }
+
+    /**
+     * Registra un utente con nome e cognome.
+     *
+     * @param nome    nome dell'utente
+     * @param cognome cognome dell'utente
+     */
+    public void registrati(String nome, String cognome) {
+        this.nome = nome;
+        this.cognome = cognome;
+    }
+
+    /**
+     * Aggiunge un risultato alla lista dei risultati dell'utente.
+     *
+     * @param risultato il risultato da aggiungere
+     */
+    public void aggiungiRisultato(RisultatoPartita risultato) {
+        risultati.add(risultato);
+        System.out.println("Risultato aggiunto per l'utente: " + nome + " " + cognome);
+    }
+
+    // Getter e setter
+    public String getNome() {
+        return nome;
+    }
+
+    public void setNome(String nome) {
+        this.nome = nome;
+    }
+
+    public String getCognome() {
+        return cognome;
+    }
+
+    public void setCognome(String cognome) {
+        this.cognome = cognome;
+    }
+
+    public List<RisultatoPartita> getRisultati() {
+        return risultati;
+    }
+}
+
+// 9. GestioneUtenti
+class GestioneUtenti {
+
+    private List<Utente> utenti; // Lista degli utenti registrati
+    private static final String FILE_UTENTI = "utenti.dat"; // Percorso del file di salvataggio
+
+    /**
+     * Costruttore per inizializzare la gestione utenti.
+     */
+    public GestioneUtenti() {
+        this.utenti = new ArrayList<>();
+        caricaUtenti();
+    }
+
+    /**
+     * Registra un nuovo utente con nome e cognome.
+     *
+     * @param nome    nome dell'utente
+     * @param cognome cognome dell'utente
+     */
+    public void registraUtente(String nome, String cognome) {
+        Utente utente = new Utente(nome, cognome);
+        utenti.add(utente);
+        System.out.println("Utente registrato: " + nome + " " + cognome);
+        salvaUtenti();
+    }
+
+    /**
+     * Carica gli utenti da un file persistente.
+     */
+    @SuppressWarnings("unchecked")
+    public void caricaUtenti() {
+        File fileUtenti = new File(FILE_UTENTI);
+        if (fileUtenti.exists()) {
+            try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(FILE_UTENTI))) {
+                utenti = (List<Utente>) ois.readObject();
+                System.out.println("Utenti caricati dal file.");
+            } catch (FileNotFoundException e) {
+                System.out.println("File utenti non trovato, sarà creato uno nuovo.");
+            } catch (IOException | ClassNotFoundException e) {
+                System.err.println("Errore durante il caricamento degli utenti: " + e.getMessage());
+            }
+        } else {
+            System.out.println("File utenti non esistente, nessun utente caricato.");
+        }
+    }
+
+    /**
+     * Salva gli utenti in un file persistente.
+     */
+    public void salvaUtenti() {
+        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(FILE_UTENTI))) {
+            oos.writeObject(utenti);
+            System.out.println("Utenti salvati su file.");
+        } catch (IOException e) {
+            System.err.println("Errore durante il salvataggio degli utenti: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Restituisce la lista degli utenti registrati.
+     *
+     * @return lista degli utenti
+     */
+    public List<Utente> getUtenti() {
+        return utenti;
+    }
+}
+
+// 10. RisultatoPartita
+class RisultatoPartita implements Serializable {
+
+    private Utente utente;
+    private int tempo;
+    private String livelloDifficolta; // Modificato da int a String
+    private int numMicrorobot;
+
+    /**
+     * Costruttore per inizializzare un risultato di partita.
+     *
+     * @param utente           l'utente che ha giocato
+     * @param tempo            il tempo impiegato
+     * @param livelloDifficolta il livello di difficoltà (Facile, Medio, Difficile)
+     * @param numMicrorobot    il numero di microrobot utilizzati
+     */
+    public RisultatoPartita(Utente utente, int tempo, String livelloDifficolta, int numMicrorobot) {
+        this.utente = utente;
+        this.tempo = tempo;
+        this.livelloDifficolta = livelloDifficolta;
+        this.numMicrorobot = numMicrorobot;
+    }
+
+    // Getter e setter
+    public Utente getUtente() {
+        return utente;
+    }
+
+    public void setUtente(Utente utente) {
+        this.utente = utente;
+    }
+
+    public int getTempo() {
+        return tempo;
+    }
+
+    public void setTempo(int tempo) {
+        this.tempo = tempo;
+    }
+
+    public String getLivelloDifficolta() {
+        return livelloDifficolta;
+    }
+
+    public void setLivelloDifficolta(String livelloDifficolta) {
+        this.livelloDifficolta = livelloDifficolta;
+    }
+
+    public int getNumMicrorobot() {
+        return numMicrorobot;
+    }
+
+    public void setNumMicrorobot(int numMicrorobot) {
+        this.numMicrorobot = numMicrorobot;
+    }
+
+    @Override
+    public String toString() {
+        return "Utente: " + utente.getNome() + " " + utente.getCognome() +
+                ", Tempo: " + tempo + " secondi, Livello Difficoltà: " + livelloDifficolta + ", Microrobot: " + numMicrorobot;
+    }
+}
+
+// 11. Interfacce Grafiche (LoginPanel, RegistrazionePanel, MenuPanel, SelezionaUtentePanel, LabirintoPanel, ClassificaPanel)
+
+// Rimosso LoginPanel
+
+class RegistrazionePanel extends JPanel {
+    private GestioneUtenti gestioneUtenti;
+    private JTextField nomeField;
+    private JTextField cognomeField;
+    private JFrame frame;
+
+    public RegistrazionePanel(JFrame frame) {
+        this.frame = frame;
+        gestioneUtenti = new GestioneUtenti();
+        setLayout(new GridLayout(4, 2));
+
+        JLabel nomeLabel = new JLabel("Nome:");
+        nomeField = new JTextField();
+        JLabel cognomeLabel = new JLabel("Cognome:");
+        cognomeField = new JTextField();
+
+        JButton registerButton = new JButton("Registrati");
+        // Rimosso bottone Indietro
+
+        registerButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                String nome = nomeField.getText();
+                String cognome = cognomeField.getText();
+
+                if (nome.isEmpty() || cognome.isEmpty()) {
+                    JOptionPane.showMessageDialog(RegistrazionePanel.this,
+                            "Compila tutti i campi.",
+                            "Errore",
+                            JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+
+                gestioneUtenti.registraUtente(nome, cognome);
+                JOptionPane.showMessageDialog(RegistrazionePanel.this,
+                        "Utente registrato con successo!",
+                        "Registrazione Completata",
+                        JOptionPane.INFORMATION_MESSAGE);
+
+                // Inizia una nuova partita per il nuovo utente
+                Utente nuovoUtente = new Utente(nome, cognome);
+                for (Utente utente : gestioneUtenti.getUtenti())
+                {
+                    if (utente.getNome().equals(nome) && utente.getCognome().equals(cognome))
+                    {
+                        nuovoUtente = utente;
+                    }
+                }
+                apriMenuPrincipale();
+            }
+        });
+
+        // Rimosso backButton e relativo ActionListener
+
+        add(nomeLabel);
+        add(nomeField);
+        add(cognomeLabel);
+        add(cognomeField);
+        add(new JLabel(""));
+        add(registerButton);
+        add(new JLabel(""));
+        // Rimossa riga per il backButton
+    }
+    // Rimosso metodo tornaAlLogin()
+
+    private void apriMenuPrincipale() {
+        frame.getContentPane().removeAll();
+        frame.getContentPane().add(new MenuPanel(frame));
+        frame.revalidate();
+        frame.repaint();
+    }
+}
+
+class MenuPanel extends JPanel {
+    private JFrame frame;
+    private GestioneUtenti gestioneUtenti;
+    private Utente utenteCorrente;
+
+    public MenuPanel(JFrame frame) {
+        this.frame = frame;
+        this.gestioneUtenti = new GestioneUtenti();
+        this.utenteCorrente = null;
+
+        setLayout(new GridLayout(5, 1));
+
+        JButton nuovaPartitaButton = new JButton("Nuova Partita");
+        JButton classificaButton = new JButton("Classifica");
+        JButton esciButton = new JButton("Esci");
+
+        nuovaPartitaButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                selezionaUtente();
+            }
+        });
+
+        classificaButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                mostraClassifica();
+            }
+        });
+
+        esciButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                System.exit(0);
+            }
+        });
+
+        add(nuovaPartitaButton);
+        add(classificaButton);
+        add(esciButton);
+    }
+
+    private void selezionaUtente() {
+        frame.getContentPane().removeAll();
+        SelezionaUtentePanel selezionaUtentePanel = new SelezionaUtentePanel(frame, gestioneUtenti);
+        frame.getContentPane().add(selezionaUtentePanel);
+        frame.revalidate();
+        frame.repaint();
+    }
+
+    private void mostraClassifica() {
+        frame.getContentPane().removeAll();
+        frame.getContentPane().add(new ClassificaPanel(frame, gestioneUtenti));
+        frame.revalidate();
+        frame.repaint();
+    }
+}
+
+// Nuovo pannello per la selezione dell'utente
+class SelezionaUtentePanel extends JPanel {
+    private JFrame frame;
+    private GestioneUtenti gestioneUtenti;
+    private JComboBox<String> utentiComboBox;
+    private JButton confermaButton;
+
+    public SelezionaUtentePanel(JFrame frame, GestioneUtenti gestioneUtenti) {
+        this.frame = frame;
+        this.gestioneUtenti = gestioneUtenti;
+
+        setLayout(new GridLayout(3, 1));
+
+        utentiComboBox = new JComboBox<>();
+        for (Utente utente : gestioneUtenti.getUtenti()) {
+            utentiComboBox.addItem(utente.getNome() + " " + utente.getCognome());
+        }
+
+        confermaButton = new JButton("Conferma");
+        confermaButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                String utenteSelezionatoString = (String) utentiComboBox.getSelectedItem();
+                Utente utenteSelezionato = null;
+                for (Utente u : gestioneUtenti.getUtenti()) {
+                    if ((u.getNome() + " " + u.getCognome()).equals(utenteSelezionatoString)) {
+                        utenteSelezionato = u;
+                        break;
+                    }
+                }
+
+                if (utenteSelezionato != null) {
+                    chiediNumeroMicrorobot(utenteSelezionato);
+                }
+            }
+        });
+
+        add(new JLabel("Seleziona Utente:"));
+        add(utentiComboBox);
+        add(confermaButton);
+    }
+
+    private void chiediNumeroMicrorobot(Utente utenteSelezionato) {
+        String numRobotString = JOptionPane.showInputDialog(frame,
+                "Inserisci il numero di microrobot (1-10):",
+                "Impostazioni Partita",
+                JOptionPane.QUESTION_MESSAGE);
+
+        try {
+            int numMicrorobot = Integer.parseInt(numRobotString);
+            if (numMicrorobot < 1 || numMicrorobot > 10) {
+                JOptionPane.showMessageDialog(frame,
+                        "Numero di robot non valido. Inserisci un valore tra 1 e 10.",
+                        "Errore",
+                        JOptionPane.ERROR_MESSAGE);
+                chiediNumeroMicrorobot(utenteSelezionato);
+            } else {
+                selezionaDifficolta(utenteSelezionato, numMicrorobot);
+            }
+        } catch (NumberFormatException e) {
+            JOptionPane.showMessageDialog(frame,
+                    "Input non valido. Inserisci un numero intero.",
+                    "Errore",
+                    JOptionPane.ERROR_MESSAGE);
+            chiediNumeroMicrorobot(utenteSelezionato);
+        }
+    }
+
+    private void selezionaDifficolta(Utente utenteSelezionato, int numMicrorobot) {
+        String[] options = {"Facile", "Medio", "Difficile"};
+        int livello = JOptionPane.showOptionDialog(frame,
+                "Seleziona il livello di difficoltà:",
+                "Nuova Partita",
+                JOptionPane.YES_NO_CANCEL_OPTION,
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                options,
+                options[0]);
+
+        // Converti il livello in una stringa per il salvataggio
+        String livelloDifficolta = options[livello];
+
+        iniziaNuovaPartita(utenteSelezionato, numMicrorobot, livelloDifficolta);
+    }
+
+    private void iniziaNuovaPartita(Utente utenteSelezionato, int numMicrorobot, String livelloDifficolta) {
+        GestioneScenario gestioneScenario = new GestioneScenario();
+
+        // Imposta il numero di botole in base alla difficoltà
+        int numBotole = 0;
+        switch (livelloDifficolta) {
+            case "Facile":
+                numBotole = 3;
+                break;
+            case "Medio":
+                numBotole = 5;
+                break;
+            case "Difficile":
+                numBotole = 7;
+                break;
+        }
+
+        int livello = 0;
+        switch (livelloDifficolta) {
+            case "Facile":
+                livello = 1;
+                break;
+            case "Medio":
+                livello = 2;
+                break;
+            case "Difficile":
+                livello = 3;
+                break;
+        }
+
+        gestioneScenario.selezionaScenario(livello, numBotole);
+        Labirinto labirinto = gestioneScenario.getScenarioCorrente();
+
+        // Inizializzazione Microrobot
+        List<Microrobot> microrobot = new ArrayList<>();
+        for (int i = 0; i < numMicrorobot; i++) {
+            microrobot.add(new Microrobot(i + 1, labirinto.getIngressoX(), labirinto.getIngressoY()));
+        }
+        labirinto.getMicrorobot().addAll(microrobot);
+
+        // Inizializzazione MovimentoMicrorobot
+        MovimentoMicrorobot movimento = new MovimentoMicrorobot(labirinto);
+
+        // Inizializzazione A*
+        AStar aStar = new AStar(labirinto);
+
+        // Mostra LabirintoPanel
+        frame.getContentPane().removeAll();
+        LabirintoPanel labirintoPanel = new LabirintoPanel(labirinto, movimento, aStar, utenteSelezionato, gestioneUtenti, frame, livelloDifficolta, numMicrorobot);
+        frame.getContentPane().add(labirintoPanel);
+        frame.revalidate();
+        frame.repaint();
+    }
+}
+
+class LabirintoPanel extends JPanel {
+    private Labirinto labirinto;
+    private MovimentoMicrorobot movimento;
+    private AStar aStar;
+    private int CELL_SIZE = 30; // Dimensione di una cella
+    private Utente utenteCorrente;
+    private GestioneUtenti gestioneUtenti;
+    private JFrame frame;
+    private Timer timer;
+    private long tempoInizio;
+    private int robotAggiunti; // Contatore per i robot aggiunti
+    private Timer aggiungiRobotTimer; // Timer per aggiungere robot ogni 2 secondi
+    private String livelloDifficolta;
+    private int numMicrorobot;
+
+    public LabirintoPanel(Labirinto labirinto, MovimentoMicrorobot movimento, AStar aStar, Utente utente, GestioneUtenti gestioneUtenti, JFrame frame, String livelloDifficolta, int numMicrorobot) {
+        this.labirinto = labirinto;
+        this.movimento = movimento;
+        this.aStar = aStar;
+        this.utenteCorrente = utente;
+        this.gestioneUtenti = gestioneUtenti;
+        this.frame = frame;
+        this.livelloDifficolta = livelloDifficolta;
+        this.numMicrorobot = numMicrorobot;
+        setPreferredSize(new Dimension(labirinto.getGriglia()[0].length * CELL_SIZE, labirinto.getGriglia().length * CELL_SIZE));
+
+        robotAggiunti = 0;
+        aggiungiRobotTimer = new Timer(2000, new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                if (robotAggiunti < labirinto.getMicrorobot().size()) {
+                    // Aggiungi il robot alla lista del labirinto per essere disegnato
+                    // Non è necessario aggiungerlo qui perché lo fai già in MenuPanel
+                    // labirinto.getMicrorobot().add(new Microrobot(robotAggiunti + 1, labirinto.getIngressoX(), labirinto.getIngressoY()));
+                    robotAggiunti++;
+                } else {
+                    aggiungiRobotTimer.stop(); // Ferma il timer quando tutti i robot sono stati aggiunti
+                }
+            }
+        });
+        aggiungiRobotTimer.start();
+
+        tempoInizio = System.currentTimeMillis();
+        timer = new Timer(500, new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                boolean tuttiUsciti = true;
+                // Muovi solo i robot che sono stati aggiunti
+                for (int i = 0; i < robotAggiunti; i++) {
+                    Microrobot robot = labirinto.getMicrorobot().get(i);
+                    if (!robot.isUscito()) {
+                        tuttiUsciti = false;
+                        List<Direzione> percorso = aStar.trovaPercorso(robot);
+                        if (percorso != null && !percorso.isEmpty()) {
+                            movimento.eseguiMossa(robot, percorso.get(0));
+                            if(labirinto.verificaUscita(robot)){
+                                robot.setUscito(true);
+                            }
+                        }
+                    }
+                }
+                repaint();
+
+                // Controlla se tutti i robot aggiunti sono usciti
+                boolean tuttiRobotAggiuntiUsciti = true;
+                for(int i = 0; i < robotAggiunti; i++){
+                    if(!labirinto.getMicrorobot().get(i).isUscito()){
+                        tuttiRobotAggiuntiUsciti = false;
+                        break;
+                    }
+                }
+                if (tuttiRobotAggiuntiUsciti && robotAggiunti == labirinto.getMicrorobot().size()) {
+                    timer.stop();
+                    long tempoFine = System.currentTimeMillis();
+                    long tempoTrascorso = (tempoFine - tempoInizio) / 1000; // Tempo in secondi
+                    registraRisultato((int) tempoTrascorso);
+                    // Mostra il messaggio di vittoria
+                    JOptionPane.showMessageDialog(frame,
+                            "Tutti i microrobot hanno raggiunto l'uscita!\nTempo impiegato: " + tempoTrascorso + " secondi",
+                            "Risultato registrato!",
+                            JOptionPane.INFORMATION_MESSAGE);
+                    // Torna al menu principale
+                    frame.getContentPane().removeAll();
+                    frame.getContentPane().add(new SelezionaUtentePanel(frame, gestioneUtenti));
+                    frame.revalidate();
+                    frame.repaint();
+                }
+            }
+        });
+        timer.start();
+    }
+
+    private void registraRisultato(int tempo) {
+        RisultatoPartita risultato = new RisultatoPartita(utenteCorrente, tempo, livelloDifficolta, numMicrorobot);
+        utenteCorrente.aggiungiRisultato(risultato);
+        gestioneUtenti.salvaUtenti();
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+
+        int[][] griglia = labirinto.getGriglia();
+        for (int i = 0; i < griglia.length; i++) {
+            for (int j = 0; j < griglia[i].length; j++) {
+                if (griglia[i][j] == 1) {
+                    g.setColor(Color.BLACK); // Pareti
+                } else {
+                    g.setColor(Color.WHITE); // Spazi vuoti
+                }
+                g.fillRect(j * CELL_SIZE, i * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+
+                g.setColor(Color.GRAY); // Griglia
+                g.drawRect(j * CELL_SIZE, i * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+            }
+        }
+
+        g.setColor(Color.GREEN); // Ingresso
+        g.fillRect(labirinto.getIngressoY() * CELL_SIZE, labirinto.getIngressoX() * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+
+        g.setColor(Color.RED); // Uscita
+        g.fillRect(labirinto.getUscitaY() * CELL_SIZE, labirinto.getUscitaX() * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+
+        for (int i = 0; i < robotAggiunti; i++) {
+            Microrobot robot = labirinto.getMicrorobot().get(i);
+            if (!robot.isUscito()) {
+                g.setColor(Color.BLUE); // Microrobot
+                g.fillOval(robot.getY() * CELL_SIZE, robot.getX() * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+            }
+        }
+        //Disegna botole
+        for(Botola botola : labirinto.getBotole()){
+            g.setColor(Color.YELLOW);
+            g.fillRect(botola.getY()*CELL_SIZE, botola.getX()*CELL_SIZE, CELL_SIZE, CELL_SIZE);
+        }
+    }
+}
+
+class ClassificaPanel extends JPanel {
+    private GestioneUtenti gestioneUtenti;
+    private JFrame frame;
+
+    public ClassificaPanel(JFrame frame, GestioneUtenti gestioneUtenti) {
+        this.frame = frame;
+        this.gestioneUtenti = gestioneUtenti;
+        setLayout(new BorderLayout());
+
+        JTextArea classificaArea = new JTextArea();
+        classificaArea.setEditable(false);
+
+        // Ordina gli utenti
+        List<Utente> utentiOrdinati = new ArrayList<>(gestioneUtenti.getUtenti());
+        utentiOrdinati.sort(Comparator.comparing(Utente::getNome));
+
+        for (Utente utente : utentiOrdinati) {
+            classificaArea.append("Utente: " + utente.getNome() + " " + utente.getCognome() + "\n");
+
+            // Ordina i risultati per difficoltà decrescente e poi per tempo crescente
+            List<RisultatoPartita> risultatiOrdinati = new ArrayList<>(utente.getRisultati());
+            risultatiOrdinati.sort(Comparator
+                    .comparing(RisultatoPartita::getLivelloDifficolta)
+                    .reversed()
+                    .thenComparing(RisultatoPartita::getTempo));
+
+            for (RisultatoPartita risultato : risultatiOrdinati) {
+                classificaArea.append("  " + risultato + "\n");
+            }
+        }
+
+        JScrollPane scrollPane = new JScrollPane(classificaArea);
+        add(scrollPane, BorderLayout.CENTER);
+
+        JButton backButton = new JButton("Torna al Menu");
+        backButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                frame.getContentPane().removeAll();
+                frame.getContentPane().add(new MenuPanel(frame));
+                frame.revalidate();
+                frame.repaint();
+            }
+        });
+        add(backButton, BorderLayout.SOUTH);
+    }
+}
+
+// 12. GestioneScenario
+class GestioneScenario implements Serializable{
+
+    private List<Labirinto> scenari; // Lista degli scenari disponibili
+    private Labirinto scenarioCorrente; // Scenario selezionato
+    private Labirinto scenarioPrecedente; // Scenario precedente
+
+    /**
+     * Costruttore per inizializzare la gestione degli scenari.
+     */
+    public GestioneScenario() {
+        this.scenari = new ArrayList<>();
+        inizializzaScenari();
+        this.scenarioPrecedente = null;
+    }
+
+    /**
+     * Inizializza i livelli di difficoltà (scenari).
+     */
+    private void inizializzaScenari() {
+        // In questo caso, i livelli di difficoltà non cambiano il numero di botole
+        Labirinto facile = new Labirinto(15, 15, 3);
+        facile.inizializzaScenario(1);
+        Labirinto medio = new Labirinto(20, 20, 5);
+        medio.inizializzaScenario(2);
+        Labirinto difficile = new Labirinto(25, 25, 7);
+        difficile.inizializzaScenario(3);
+
+        scenari.add(facile);
+        scenari.add(medio);
+        scenari.add(difficile);
+
+        scenarioCorrente = facile; // Imposta lo scenario di default
+    }
+
+    /**
+     * Permette all'utente di selezionare uno scenario specifico.
+     *
+     * @param livello il livello di difficoltà da selezionare
+     * @param numBotole il numero di botole da usare
+     */
+    public void selezionaScenario(int livello, int numBotole) {
+        if (livello > 0 && livello <= scenari.size()) {
+            // Salva lo scenario corrente come precedente prima di cambiare
+            scenarioPrecedente = scenarioCorrente;
+
+            scenarioCorrente = copiaLabirinto(scenari.get(livello - 1));
+            scenarioCorrente.getBotole().clear(); // Rimuovi le vecchie botole
+            scenarioCorrente = new Labirinto(scenarioCorrente.getGriglia().length, scenarioCorrente.getGriglia()[0].length, numBotole);
+            scenarioCorrente.inizializzaScenario(livello);
+            System.out.println("Scenario di livello " + livello + " selezionato con " + numBotole + " botole.");
+        } else {
+            System.out.println("Livello non valido. Seleziona un valore tra 1 e " + scenari.size());
+        }
+    }
+
+    // Metodo per creare una copia profonda del labirinto
+    private Labirinto copiaLabirinto(Labirinto originale) {
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ObjectOutputStream oos = new ObjectOutputStream(baos);
+            oos.writeObject(originale);
+
+            ByteArrayInputStream bais = new ByteArrayInputStream(baos.toByteArray());
+            ObjectInputStream ois = new ObjectInputStream(bais);
+            return (Labirinto) ois.readObject();
+        } catch (IOException | ClassNotFoundException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    /**
+     * Ripristina lo scenario corrente allo stato precedente.
+     */
+    public void ripristinaScenario() {
+        if (scenarioPrecedente != null) {
+            // Scambia scenario corrente con precedente
+            Labirinto temp = scenarioCorrente;
+            scenarioCorrente = scenarioPrecedente;
+            scenarioPrecedente = temp;
+            System.out.println("Scenario ripristinato allo stato precedente.");
+        } else {
+            System.out.println("Nessuno scenario precedente disponibile.");
+        }
+    }
+
+    // Getter per lo scenario corrente
+    public Labirinto getScenarioCorrente() {
+        return scenarioCorrente;
+    }
+}
+
+// 13. GestioneFile
+class GestioneFile {
+
+    /**
+     * Salva un oggetto serializzabile su file.
+     *
+     * @param percorso il percorso del file dove salvare i dati
+     * @param dati     l'oggetto da salvare
+     */
+    public void salvaSuFile(String percorso, Object dati) {
+        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(percorso))) {
+            oos.writeObject(dati);
+            System.out.println("Dati salvati correttamente su: " + percorso);
+        } catch (IOException e) {
+            System.err.println("Errore durante il salvataggio dei dati: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Carica un oggetto serializzabile da un file.
+     *
+     * @param percorso il percorso del file da cui caricare i dati
+     * @return l'oggetto caricato dal file, o null in caso di errore
+     */
+    public Object caricaDaFile(String percorso) {
+        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(percorso))) {
+            Object dati = ois.readObject();
+            System.out.println("Dati caricati correttamente da: " + percorso);
+            return dati;
+        } catch (FileNotFoundException e) {
+            System.err.println("File non trovato: " + percorso);
+        } catch (IOException | ClassNotFoundException e) {
+            System.err.println("Errore durante il caricamento dei dati: " + e.getMessage());
+        }
+        return null;
+    }
+}
+
+// 14. EccezioniPersonalizzate
+class EccezioniPersonalizzate {
+
+    /**
+     * Eccezione per un labirinto non valido.
+     */
+    public static class EccezioneLabirintoNonValido extends Exception {
+        /**
+         * Costruttore per creare un'eccezione specifica.
+         *
+         * @param messaggio il messaggio di errore
+         */
+        public EccezioneLabirintoNonValido(String messaggio) {
+            super(messaggio);
+        }
+    }
+
+    /**
+     * Eccezione per microrobot bloccati.
+     */
+    public static class EccezioneMicrorobotBloccato extends Exception {
+        /**
+         * Costruttore per creare un'eccezione specifica.
+         *
+         * @param messaggio il messaggio di errore
+         */
+        public EccezioneMicrorobotBloccato(String messaggio) {
+            super(messaggio);
+        }
+    }
+}
