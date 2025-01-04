@@ -1,0 +1,1345 @@
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.io.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+import java.util.PriorityQueue;
+import java.util.Comparator;
+
+// 1. Main
+public class Main {
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            JFrame frame = new JFrame("Simulatore di Microrobot nel Labirinto");
+            frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            frame.add(new RegistrazionePanel(frame));
+            frame.pack();
+            frame.setLocationRelativeTo(null);
+            frame.setVisible(true);
+        });
+    }
+}
+
+// 2. Labirinto
+interface ILabirinto extends Serializable {
+    int[][] getGriglia();
+    int getIngressoX();
+    int getIngressoY();
+    int getUscitaX();
+    int getUscitaY();
+    List<IBotola> getBotole();
+    List<Microrobot> getMicrorobot();
+    void inizializzaScenario(int livello) throws EccezioniPersonalizzate.EccezioneLabirintoNonValido;
+    boolean verificaUscita(Microrobot robot);
+    void spostaMicrorobot(Microrobot robot, Direzione dir) throws EccezioniPersonalizzate.EccezioneMicrorobotBloccato;
+}
+
+class Labirinto implements ILabirinto {
+
+    private int[][] griglia;
+    private int ingressoX, ingressoY;
+    private int uscitaX, uscitaY;
+    private List<IBotola> botole;
+    private List<Microrobot> microrobot;
+    private int numBotole;
+
+    public Labirinto(int larghezza, int altezza, int numBotole) {
+        this.griglia = new int[larghezza][altezza];
+        this.botole = new ArrayList<>();
+        this.microrobot = new ArrayList<>();
+        this.numBotole = numBotole;
+        this.ingressoX = 0;
+        this.ingressoY = 0;
+        this.uscitaX = larghezza - 1;
+        this.uscitaY = altezza - 1;
+    }
+
+    @Override
+    public void inizializzaScenario(int livello) throws EccezioniPersonalizzate.EccezioneLabirintoNonValido {
+        System.out.println("Inizializzazione scenario di livello: " + livello);
+        Random random = new Random();
+
+        for (int i = 0; i < griglia.length; i++) {
+            for (int j = 0; j < griglia[0].length; j++) {
+                griglia[i][j] = 0;
+            }
+        }
+
+        for (int i = 0; i < griglia.length; i++) {
+            for (int j = 0; j < griglia[0].length; j++) {
+                if ((i == ingressoX && j == ingressoY) || (i == uscitaX && j == uscitaY)) continue;
+
+                if (random.nextDouble() < 0.3) {
+                    if (contaMuriAdiacenti(i, j) <= 2 && !bloccaUscita(i, j)) {
+                        griglia[i][j] = 1;
+                    }
+                }
+            }
+        }
+        posizionaBotole();
+    }
+
+    private int contaMuriAdiacenti(int riga, int colonna) {
+        int conta = 0;
+        if (riga > 0 && griglia[riga - 1][colonna] == 1) conta++;
+        if (riga < griglia.length - 1 && griglia[riga + 1][colonna] == 1) conta++;
+        if (colonna > 0 && griglia[riga][colonna - 1] == 1) conta++;
+        if (colonna < griglia[0].length - 1 && griglia[riga][colonna + 1] == 1) conta++;
+        return conta;
+    }
+
+    private boolean bloccaUscita(int riga, int colonna) throws EccezioniPersonalizzate.EccezioneLabirintoNonValido {
+        int[][] grigliaTemp = new int[griglia.length][griglia[0].length];
+        for (int i = 0; i < griglia.length; i++) {
+            System.arraycopy(griglia[i], 0, grigliaTemp[i], 0, griglia[0].length);
+        }
+
+        grigliaTemp[riga][colonna] = 1;
+        return !esistePercorso(grigliaTemp, ingressoX, ingressoY, uscitaX, uscitaY);
+    }
+
+    private boolean esistePercorso(int[][] griglia, int startX, int startY, int endX, int endY) throws EccezioniPersonalizzate.EccezioneLabirintoNonValido {
+        if(startX < 0 || startX >= griglia.length || startY < 0 || startY >= griglia[0].length ||
+                endX < 0 || endX >= griglia.length || endY < 0 || endY >= griglia[0].length){
+            throw new EccezioniPersonalizzate.EccezioneLabirintoNonValido("Coordinate di partenza o fine non valide");
+        }
+        boolean[][] visitato = new boolean[griglia.length][griglia[0].length];
+        List<Point> coda = new ArrayList<>();
+        coda.add(new Point(startX, startY));
+        visitato[startX][startY] = true;
+
+        int[] dx = {-1, 1, 0, 0};
+        int[] dy = {0, 0, -1, 1};
+
+        while (!coda.isEmpty()) {
+            Point corrente = coda.remove(0);
+
+            if (corrente.x == endX && corrente.y == endY) {
+                return true;
+            }
+
+            for (int i = 0; i < 4; i++) {
+                int nuovoX = corrente.x + dx[i];
+                int nuovoY = corrente.y + dy[i];
+
+                if (nuovoX >= 0 && nuovoX < griglia.length &&
+                        nuovoY >= 0 && nuovoY < griglia[0].length &&
+                        griglia[nuovoX][nuovoY] == 0 && !visitato[nuovoX][nuovoY]) {
+                    coda.add(new Point(nuovoX, nuovoY));
+                    visitato[nuovoX][nuovoY] = true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private void posizionaBotole() {
+        Random random = new Random();
+        for (int i = 0; i < numBotole; i++) {
+            int x, y;
+            do {
+                x = random.nextInt(griglia.length);
+                y = random.nextInt(griglia[0].length);
+            } while (griglia[x][y] == 1 || (x == ingressoX && y == ingressoY) || (x == uscitaX && y == uscitaY));
+
+            botole.add(new Botola(x, y));
+        }
+    }
+    @Override
+    public void spostaMicrorobot(Microrobot robot, Direzione dir) throws EccezioniPersonalizzate.EccezioneMicrorobotBloccato {
+        int nuovoX = robot.getX() + dir.getDeltaX();
+        int nuovoY = robot.getY() + dir.getDeltaY();
+
+        if (nuovoX >= 0 && nuovoX < griglia.length &&
+                nuovoY >= 0 && nuovoY < griglia[0].length &&
+                griglia[nuovoX][nuovoY] != 1) {
+            for (IBotola botola : botole) {
+                if (botola.getX() == nuovoX && botola.getY() == nuovoY) {
+                    botola.attiva(robot, this);
+                    return;
+                }
+            }
+            robot.setX(nuovoX);
+            robot.setY(nuovoY);
+        } else {
+            spostaInDirezioneAlternativa(robot, dir);
+        }
+    }
+
+    private void spostaInDirezioneAlternativa(Microrobot robot, Direzione dir) throws EccezioniPersonalizzate.EccezioneMicrorobotBloccato {
+        List<Direzione> direzioniAlternative = new ArrayList<>();
+        switch (dir) {
+            case NORD:
+            case SUD:
+                direzioniAlternative.add(Direzione.EST);
+                direzioniAlternative.add(Direzione.OVEST);
+                direzioniAlternative.add(dir == Direzione.NORD ? Direzione.SUD : Direzione.NORD);
+                break;
+            case EST:
+            case OVEST:
+                direzioniAlternative.add(Direzione.NORD);
+                direzioniAlternative.add(Direzione.SUD);
+                direzioniAlternative.add(dir == Direzione.EST ? Direzione.OVEST : Direzione.EST);
+                break;
+            default:
+                direzioniAlternative.add(Direzione.NORD);
+                direzioniAlternative.add(Direzione.SUD);
+                direzioniAlternative.add(Direzione.EST);
+                direzioniAlternative.add(Direzione.OVEST);
+                break;
+        }
+
+        for (Direzione dirAlt : direzioniAlternative) {
+            int nuovoX = robot.getX() + dirAlt.getDeltaX();
+            int nuovoY = robot.getY() + dirAlt.getDeltaY();
+            if (nuovoX >= 0 && nuovoX < griglia.length &&
+                    nuovoY >= 0 && nuovoY < griglia[0].length &&
+                    griglia[nuovoX][nuovoY] != 1) {
+                robot.setX(nuovoX);
+                robot.setY(nuovoY);
+                System.out.println("Robot " + robot.getId() + " è stato spostato in direzione alternativa: " + dirAlt);
+                return;
+            }
+        }
+
+        throw new EccezioniPersonalizzate.EccezioneMicrorobotBloccato("Robot " + robot.getId() + " è bloccato e non può muoversi in nessuna direzione.");
+    }
+
+    @Override
+    public boolean verificaUscita(Microrobot robot) {
+        return robot.getX() == uscitaX && robot.getY() == uscitaY;
+    }
+
+    @Override
+    public int[][] getGriglia() {
+        return griglia;
+    }
+
+    @Override
+    public int getIngressoX() {
+        return ingressoX;
+    }
+
+    @Override
+    public int getIngressoY() {
+        return ingressoY;
+    }
+
+    @Override
+    public int getUscitaX() {
+        return uscitaX;
+    }
+
+    @Override
+    public int getUscitaY() {
+        return uscitaY;
+    }
+
+    @Override
+    public List<IBotola> getBotole() {
+        return botole;
+    }
+
+    @Override
+    public List<Microrobot> getMicrorobot() {
+        return microrobot;
+    }
+}
+
+// 3. Microrobot
+class Microrobot {
+
+    private int id;
+    private int x, y;
+    private boolean uscito;
+
+    public Microrobot(int id, int x, int y) {
+        this.id = id;
+        this.x = x;
+        this.y = y;
+        this.uscito = false;
+    }
+
+    public void muovi(Direzione dir) {
+        this.x += dir.getDeltaX();
+        this.y += dir.getDeltaY();
+    }
+
+    public void reset(int x, int y) {
+        this.x = x;
+        this.y = y;
+        this.uscito = false;
+    }
+
+    public int getId() {
+        return id;
+    }
+
+    public int getX() {
+        return x;
+    }
+
+    public void setX(int x) {
+        this.x = x;
+    }
+
+    public int getY() {
+        return y;
+    }
+
+    public void setY(int y) {
+        this.y = y;
+    }
+
+    public boolean isUscito() {
+        return uscito;
+    }
+
+    public void setUscito(boolean uscito) {
+        this.uscito = uscito;
+    }
+}
+
+// 4. Botola
+interface IBotola extends Serializable{
+    int getX();
+    void setX(int x);
+    int getY();
+    void setY(int y);
+    void attiva(Microrobot robot, ILabirinto labirinto);
+}
+class Botola implements IBotola {
+
+    private int x;
+    private int y;
+
+    public Botola(int x, int y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    @Override
+    public void attiva(Microrobot robot, ILabirinto labirinto) {
+        Random random = new Random();
+        int nuovaX, nuovaY;
+        do {
+            nuovaX = random.nextInt(labirinto.getGriglia().length);
+            nuovaY = random.nextInt(labirinto.getGriglia()[0].length);
+        } while (labirinto.getGriglia()[nuovaX][nuovaY] == 1 ||
+                (nuovaX == labirinto.getIngressoX() && nuovaY == labirinto.getIngressoY()) ||
+                (nuovaX == labirinto.getUscitaX() && nuovaY == labirinto.getUscitaY()));
+
+        robot.setX(nuovaX);
+        robot.setY(nuovaY);
+        System.out.println("Botola attivata! Robot " + robot.getId() + " spostato a (" + nuovaX + ", " + nuovaY + ").");
+    }
+
+    @Override
+    public int getX() {
+        return x;
+    }
+
+    @Override
+    public void setX(int x) {
+        this.x = x;
+    }
+
+    @Override
+    public int getY() {
+        return y;
+    }
+
+    @Override
+    public void setY(int y) {
+        this.y = y;
+    }
+}
+
+// 5. Algoritmo Artificial Bee Colony
+interface AlgoritmoRicerca {
+    List<Direzione> trovaPercorso(Microrobot robot, ILabirinto labirinto);
+}
+
+class ArtificialBeeColony implements AlgoritmoRicerca {
+
+    private int numeroApi;
+    private int maxCicli;
+    private int limiteAbbandono;
+    private Random random = new Random();
+
+    public ArtificialBeeColony(int numeroApi, int maxCicli, int limiteAbbandono) {
+        this.numeroApi = numeroApi;
+        this.maxCicli = maxCicli;
+        this.limiteAbbandono = limiteAbbandono;
+    }
+
+    @Override
+    public List<Direzione> trovaPercorso(Microrobot robot, ILabirinto labirinto) {
+        List<ArtificialBeeColony.Soluzione> popolazione = inizializzaPopolazione(robot, labirinto);
+        int[] contatoreAbbandono = new int[numeroApi];
+
+        for (int ciclo = 0; ciclo < maxCicli; ciclo++) {
+            inviaApiOccupate(popolazione, contatoreAbbandono, labirinto);
+            inviaApiOsservatrici(popolazione, contatoreAbbandono, labirinto);
+            inviaApiEsploratrici(popolazione, contatoreAbbandono, labirinto);
+
+            ArtificialBeeColony.Soluzione miglioreSoluzione = trovaMiglioreSoluzione(popolazione);
+            if (labirinto.verificaUscita(new Microrobot(-1, miglioreSoluzione.getX(), miglioreSoluzione.getY()))) {
+                return miglioreSoluzione.getPercorso();
+            }
+        }
+
+        ArtificialBeeColony.Soluzione miglioreSoluzione = trovaMiglioreSoluzione(popolazione);
+        if (miglioreSoluzione.getFitness() > calcolaFitness(robot.getX(), robot.getY(), labirinto)) {
+            return miglioreSoluzione.getPercorso();
+        } else {
+            return null; // Nessun percorso trovato
+        }
+    }
+
+    private List<ArtificialBeeColony.Soluzione> inizializzaPopolazione(Microrobot robot, ILabirinto labirinto) {
+        List<ArtificialBeeColony.Soluzione> popolazione = new ArrayList<>();
+        for (int i = 0; i < numeroApi; i++) {
+            ArtificialBeeColony.Soluzione soluzione = generaSoluzioneCasuale(robot, labirinto);
+            popolazione.add(soluzione);
+        }
+        return popolazione;
+    }
+
+    private ArtificialBeeColony.Soluzione generaSoluzioneCasuale(Microrobot robot, ILabirinto labirinto) {
+        int x = robot.getX();
+        int y = robot.getY();
+        List<Direzione> percorso = new ArrayList<>();
+        int maxMosse = labirinto.getGriglia().length * labirinto.getGriglia()[0].length;
+
+        for (int i = 0; i < maxMosse; i++) {
+            List<Direzione> possibiliMosse = trovaMossePossibili(x, y, labirinto);
+            if (possibiliMosse.isEmpty()) {
+                break;
+            }
+
+            Direzione mossa = possibiliMosse.get(random.nextInt(possibiliMosse.size()));
+            x += mossa.getDeltaX();
+            y += mossa.getDeltaY();
+            percorso.add(mossa);
+
+            if (labirinto.verificaUscita(new Microrobot(-1, x, y))) {
+                break;
+            }
+        }
+
+        return new ArtificialBeeColony.Soluzione(x, y, percorso, calcolaFitness(x, y, labirinto));
+    }
+
+    private List<Direzione> trovaMossePossibili(int x, int y, ILabirinto labirinto) {
+        List<Direzione> mosse = new ArrayList<>();
+        for (Direzione direzione : Direzione.values()) {
+            int nuovoX = x + direzione.getDeltaX();
+            int nuovoY = y + direzione.getDeltaY();
+            if (nuovoX >= 0 && nuovoX < labirinto.getGriglia().length &&
+                    nuovoY >= 0 && nuovoY < labirinto.getGriglia()[0].length &&
+                    labirinto.getGriglia()[nuovoX][nuovoY] != 1) {
+                mosse.add(direzione);
+            }
+        }
+        return mosse;
+    }
+
+    private void inviaApiOccupate(List<ArtificialBeeColony.Soluzione> popolazione, int[] contatoreAbbandono, ILabirinto labirinto) {
+        for (int i = 0; i < numeroApi; i++) {
+            ArtificialBeeColony.Soluzione soluzione = popolazione.get(i);
+            ArtificialBeeColony.Soluzione nuovaSoluzione = esploraVicinato(soluzione, labirinto);
+
+            if (nuovaSoluzione.getFitness() > soluzione.getFitness()) {
+                popolazione.set(i, nuovaSoluzione);
+                contatoreAbbandono[i] = 0;
+            } else {
+                contatoreAbbandono[i]++;
+            }
+        }
+    }
+
+    private ArtificialBeeColony.Soluzione esploraVicinato(ArtificialBeeColony.Soluzione soluzione, ILabirinto labirinto) {
+        int x = soluzione.getX();
+        int y = soluzione.getY();
+        List<Direzione> percorso = new ArrayList<>(soluzione.getPercorso());
+
+        int indiceModifica = random.nextInt(percorso.size() + 1); // +1 per permettere l'aggiunta di una nuova mossa alla fine
+
+        if (indiceModifica == percorso.size()) {
+            List<Direzione> mossePossibili = trovaMossePossibili(x, y, labirinto);
+            if (!mossePossibili.isEmpty()) {
+                Direzione nuovaDirezione = mossePossibili.get(random.nextInt(mossePossibili.size()));
+                percorso.add(nuovaDirezione);
+                x += nuovaDirezione.getDeltaX();
+                y += nuovaDirezione.getDeltaY();
+            }
+        } else {
+            List<Direzione> mossePossibili = new ArrayList<>();
+            for (Direzione dir : Direzione.values()) {
+                mossePossibili.add(dir);
+            }
+            Direzione nuovaDirezione = mossePossibili.get(random.nextInt(mossePossibili.size()));
+            percorso.set(indiceModifica, nuovaDirezione);
+
+            // Ricalcola il percorso dalla posizione modificata
+            int nuovoX = soluzione.getX();
+            int nuovoY = soluzione.getY();
+            for (int i = 0; i <= indiceModifica; i++) {
+                nuovoX += percorso.get(i).getDeltaX();
+                nuovoY += percorso.get(i).getDeltaY();
+            }
+            x = nuovoX;
+            y = nuovoY;
+
+            // Controlla se la nuova posizione è valida, altrimenti annulla la modifica
+            if (x < 0 || x >= labirinto.getGriglia().length || y < 0 || y >= labirinto.getGriglia()[0].length || labirinto.getGriglia()[x][y] == 1) {
+                x = soluzione.getX();
+                y = soluzione.getY();
+                percorso = new ArrayList<>(soluzione.getPercorso());
+            } else {
+                //Continua a costruire il percorso dalla posizione modificata
+                for (int i = indiceModifica + 1; i < percorso.size(); i++) {
+                    List<Direzione> mossePossibiliDopoModifica = trovaMossePossibili(x, y, labirinto);
+                    if (!mossePossibiliDopoModifica.isEmpty()) {
+                        Direzione direzioneSuccessiva = mossePossibiliDopoModifica.get(random.nextInt(mossePossibiliDopoModifica.size()));
+                        percorso.set(i, direzioneSuccessiva);
+                        x += direzioneSuccessiva.getDeltaX();
+                        y += direzioneSuccessiva.getDeltaY();
+                    } else {
+                        // Se non ci sono mosse possibili, interrompi e mantieni il percorso fino a questo punto
+                        percorso = percorso.subList(0, i);
+                        break;
+                    }
+                }
+            }
+        }
+
+        return new ArtificialBeeColony.Soluzione(x, y, percorso, calcolaFitness(x, y, labirinto));
+    }
+
+    private void inviaApiOsservatrici(List<ArtificialBeeColony.Soluzione> popolazione, int[] contatoreAbbandono, ILabirinto labirinto) {
+        double[] probabilita = calcolaProbabilita(popolazione);
+        int indiceOsservatrice = 0;
+        for (int i = 0; i < numeroApi; i++) {
+            if (random.nextDouble() < probabilita[indiceOsservatrice]) {
+                ArtificialBeeColony.Soluzione soluzione = popolazione.get(indiceOsservatrice);
+                ArtificialBeeColony.Soluzione nuovaSoluzione = esploraVicinato(soluzione, labirinto);
+
+                if (nuovaSoluzione.getFitness() > soluzione.getFitness()) {
+                    popolazione.set(indiceOsservatrice, nuovaSoluzione);
+                    contatoreAbbandono[indiceOsservatrice] = 0;
+                } else {
+                    contatoreAbbandono[indiceOsservatrice]++;
+                }
+            }
+            indiceOsservatrice = (indiceOsservatrice + 1) % numeroApi;
+        }
+    }
+
+    private double[] calcolaProbabilita(List<ArtificialBeeColony.Soluzione> popolazione) {
+        double[] probabilita = new double[numeroApi];
+        double sommaFitness = popolazione.stream().mapToDouble(ArtificialBeeColony.Soluzione::getFitness).sum();
+        for (int i = 0; i < numeroApi; i++) {
+            probabilita[i] = popolazione.get(i).getFitness() / sommaFitness;
+        }
+        return probabilita;
+    }
+
+    private void inviaApiEsploratrici(List<ArtificialBeeColony.Soluzione> popolazione, int[] contatoreAbbandono, ILabirinto labirinto) {
+        for (int i = 0; i < numeroApi; i++) {
+            if (contatoreAbbandono[i] > limiteAbbandono) {
+                popolazione.set(i, generaSoluzioneCasuale(new Microrobot(-1, labirinto.getIngressoX(), labirinto.getIngressoY()), labirinto));
+                contatoreAbbandono[i] = 0;
+            }
+        }
+    }
+
+    private ArtificialBeeColony.Soluzione trovaMiglioreSoluzione(List<ArtificialBeeColony.Soluzione> popolazione) {
+        return popolazione.stream().max(Comparator.comparingDouble(ArtificialBeeColony.Soluzione::getFitness)).orElse(null);
+    }
+
+    private double calcolaFitness(int x, int y, ILabirinto labirinto) {
+        // Inverti la distanza euclidea per usarla come fitness (maggiore è la distanza, minore è il fitness)
+        double distanza = Math.sqrt(Math.pow(x - labirinto.getUscitaX(), 2) + Math.pow(y - labirinto.getUscitaY(), 2));
+        if (distanza == 0) {
+            return Double.MAX_VALUE; // Massima fitness se l'uscita è raggiunta
+        } else {
+            return 1.0 / distanza;
+        }
+    }
+
+    private static class Soluzione {
+        private int x;
+        private int y;
+        private List<Direzione> percorso;
+        private double fitness;
+
+        public Soluzione(int x, int y, List<Direzione> percorso, double fitness) {
+            this.x = x;
+            this.y = y;
+            this.percorso = percorso;
+            this.fitness = fitness;
+        }
+
+        public int getX() {
+            return x;
+        }
+
+        public int getY() {
+            return y;
+        }
+
+        public List<Direzione> getPercorso() {
+            return percorso;
+        }
+
+        public double getFitness() {
+            return fitness;
+        }
+    }
+}
+
+// 6. MovimentoMicrorobot
+interface IMovimento {
+    void eseguiMossa(Microrobot robot, Direzione dir) throws EccezioniPersonalizzate.EccezioneMicrorobotBloccato;
+}
+
+class MovimentoMicrorobot implements IMovimento {
+
+    private ILabirinto labirinto;
+
+    public MovimentoMicrorobot(ILabirinto labirinto) {
+        this.labirinto = labirinto;
+    }
+
+    @Override
+    public void eseguiMossa(Microrobot robot, Direzione dir) throws EccezioniPersonalizzate.EccezioneMicrorobotBloccato {
+        if (labirinto != null) {
+            labirinto.spostaMicrorobot(robot, dir);
+        } else {
+            throw new IllegalStateException("Labirinto non inizializzato.");
+        }
+    }
+}
+
+// 7. Direzione
+enum Direzione {
+    NORD(-1, 0),
+    SUD(1, 0),
+    EST(0, 1),
+    OVEST(0, -1),
+    NORD_EST(-1, 1),
+    NORD_OVEST(-1, -1),
+    SUD_EST(1, 1),
+    SUD_OVEST(1, -1);
+
+    private final int deltaX;
+    private final int deltaY;
+
+    Direzione(int deltaX, int deltaY) {
+        this.deltaX = deltaX;
+        this.deltaY = deltaY;
+    }
+
+    public int getDeltaX() {
+        return deltaX;
+    }
+
+    public int getDeltaY() {
+        return deltaY;
+    }
+}
+
+// 8. Utente
+class Utente implements Serializable {
+
+    private String nome;
+    private String cognome;
+    private List<RisultatoPartita> risultati;
+
+    public Utente(String nome, String cognome) {
+        this.nome = nome;
+        this.cognome = cognome;
+        this.risultati = new ArrayList<>();
+    }
+
+    public void aggiungiRisultato(RisultatoPartita risultato) {
+        risultati.add(risultato);
+        System.out.println("Risultato aggiunto per l'utente: " + nome + " " + cognome);
+    }
+
+    public String getNome() {
+        return nome;
+    }
+
+    public void setNome(String nome) {
+        this.nome = nome;
+    }
+
+    public String getCognome() {
+        return cognome;
+    }
+
+    public void setCognome(String cognome) {
+        this.cognome = cognome;
+    }
+
+    public List<RisultatoPartita> getRisultati() {
+        return risultati;
+    }
+}
+
+// 9. GestioneUtenti
+class GestioneUtenti {
+
+    private List<Utente> utenti;
+    private GestioneFile<List<Utente>> gestioneFile;
+
+    public GestioneUtenti(String filePath) {
+        this.gestioneFile = new GestioneFile<>(filePath);
+        this.utenti = gestioneFile.caricaDaFile();
+        if (this.utenti == null) {
+            this.utenti = new ArrayList<>();
+        }
+    }
+
+    public void registraUtente(String nome, String cognome) {
+        if (nome == null || nome.trim().isEmpty() || cognome == null || cognome.trim().isEmpty()) {
+            throw new IllegalArgumentException("Nome e cognome non possono essere vuoti.");
+        }
+        Utente utente = new Utente(nome, cognome);
+        utenti.add(utente);
+        System.out.println("Utente registrato: " + nome + " " + cognome);
+        salvaUtenti();
+    }
+
+    void salvaUtenti() {
+        gestioneFile.salvaSuFile(utenti);
+        System.out.println("Utenti salvati su file.");
+    }
+
+    public List<Utente> getUtenti() {
+        return utenti;
+    }
+}
+
+// 10. RisultatoPartita
+class RisultatoPartita implements Serializable {
+
+    private Utente utente;
+    private int tempo;
+    private String livelloDifficolta;
+    private int numMicrorobot;
+
+    public RisultatoPartita(Utente utente, int tempo, String livelloDifficolta, int numMicrorobot) {
+        this.utente = utente;
+        this.tempo = tempo;
+        this.livelloDifficolta = livelloDifficolta;
+        this.numMicrorobot = numMicrorobot;
+    }
+
+    public Utente getUtente() {
+        return utente;
+    }
+
+    public void setUtente(Utente utente) {
+        this.utente = utente;
+    }
+
+    public int getTempo() {
+        return tempo;
+    }
+
+    public void setTempo(int tempo) {
+        this.tempo = tempo;
+    }
+
+    public String getLivelloDifficolta() {
+        return livelloDifficolta;
+    }
+
+    public void setLivelloDifficolta(String livelloDifficolta) {
+        this.livelloDifficolta = livelloDifficolta;
+    }
+
+    public int getNumMicrorobot() {
+        return numMicrorobot;
+    }
+
+    public void setNumMicrorobot(int numMicrorobot) {
+        this.numMicrorobot = numMicrorobot;
+    }
+
+    @Override
+    public String toString() {
+        return "Utente: " + utente.getNome() + " " + utente.getCognome() +
+                ", Tempo: " + tempo + " secondi, Livello Difficoltà: " + livelloDifficolta + ", Microrobot: " + numMicrorobot;
+    }
+}
+// 11. Interfacce Grafiche (RegistrazionePanel, MenuPanel, SelezionaUtentePanel, LabirintoPanel, ClassificaPanel)
+
+class RegistrazionePanel extends JPanel {
+    private GestioneUtenti gestioneUtenti;
+    private JTextField nomeField;
+    private JTextField cognomeField;
+    private JFrame frame;
+    private static final String FILE_UTENTI = "utenti.dat";
+
+    public RegistrazionePanel(JFrame frame) {
+        this.frame = frame;
+        gestioneUtenti = new GestioneUtenti(FILE_UTENTI);
+        setLayout(new GridLayout(4, 2));
+
+        JLabel nomeLabel = new JLabel("Nome:");
+        nomeField = new JTextField();
+        JLabel cognomeLabel = new JLabel("Cognome:");
+        cognomeField = new JTextField();
+
+        JButton registerButton = new JButton("Registrati");
+
+        registerButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                String nome = nomeField.getText();
+                String cognome = cognomeField.getText();
+
+                try {
+                    gestioneUtenti.registraUtente(nome, cognome);
+                    JOptionPane.showMessageDialog(RegistrazionePanel.this,
+                            "Utente registrato con successo!",
+                            "Registrazione Completata",
+                            JOptionPane.INFORMATION_MESSAGE);
+
+                    Utente nuovoUtente = new Utente(nome, cognome);
+                    for (Utente utente : gestioneUtenti.getUtenti()) {
+                        if (utente.getNome().equals(nome) && utente.getCognome().equals(cognome)) {
+                            nuovoUtente = utente;
+                            break;
+                        }
+                    }
+                    apriMenuPrincipale();
+                } catch (IllegalArgumentException ex) {
+                    JOptionPane.showMessageDialog(RegistrazionePanel.this,
+                            ex.getMessage(),
+                            "Errore",
+                            JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        });
+
+        add(nomeLabel);
+        add(nomeField);
+        add(cognomeLabel);
+        add(cognomeField);
+        add(new JLabel(""));
+        add(registerButton);
+        add(new JLabel(""));
+    }
+
+    private void apriMenuPrincipale() {
+        frame.getContentPane().removeAll();
+        frame.getContentPane().add(new MenuPanel(frame));
+        frame.revalidate();
+        frame.repaint();
+    }
+}
+
+class MenuPanel extends JPanel {
+    private JFrame frame;
+    private GestioneUtenti gestioneUtenti;
+    private static final String FILE_UTENTI = "utenti.dat";
+
+    public MenuPanel(JFrame frame) {
+        this.frame = frame;
+        this.gestioneUtenti = new GestioneUtenti(FILE_UTENTI);
+
+        setLayout(new GridLayout(5, 1));
+
+        JButton nuovaPartitaButton = new JButton("Nuova Partita");
+        JButton classificaButton = new JButton("Classifica");
+        JButton esciButton = new JButton("Esci");
+
+        nuovaPartitaButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                selezionaUtente();
+            }
+        });
+
+        classificaButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                mostraClassifica();
+            }
+        });
+
+        esciButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                System.exit(0);
+            }
+        });
+
+        add(nuovaPartitaButton);
+        add(classificaButton);
+        add(esciButton);
+    }
+
+    private void selezionaUtente() {
+        frame.getContentPane().removeAll();
+        SelezionaUtentePanel selezionaUtentePanel = new SelezionaUtentePanel(frame, gestioneUtenti);
+        frame.getContentPane().add(selezionaUtentePanel);
+        frame.revalidate();
+        frame.repaint();
+    }
+
+    private void mostraClassifica() {
+        frame.getContentPane().removeAll();
+        frame.getContentPane().add(new ClassificaPanel(frame, gestioneUtenti));
+        frame.revalidate();
+        frame.repaint();
+    }
+}
+
+class SelezionaUtentePanel extends JPanel {
+    private JFrame frame;
+    private GestioneUtenti gestioneUtenti;
+    private JComboBox<String> utentiComboBox;
+    private JButton confermaButton;
+
+    public SelezionaUtentePanel(JFrame frame, GestioneUtenti gestioneUtenti) {
+        this.frame = frame;
+        this.gestioneUtenti = gestioneUtenti;
+
+        setLayout(new GridLayout(3, 1));
+
+        utentiComboBox = new JComboBox<>();
+        for (Utente utente : gestioneUtenti.getUtenti()) {
+            utentiComboBox.addItem(utente.getNome() + " " + utente.getCognome());
+        }
+
+        confermaButton = new JButton("Conferma");
+        confermaButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                String utenteSelezionatoString = (String) utentiComboBox.getSelectedItem();
+                Utente utenteSelezionato = null;
+                for (Utente u : gestioneUtenti.getUtenti()) {
+                    if ((u.getNome() + " " + u.getCognome()).equals(utenteSelezionatoString)) {
+                        utenteSelezionato = u;
+                        break;
+                    }
+                }
+
+                if (utenteSelezionato != null) {
+                    chiediNumeroMicrorobot(utenteSelezionato);
+                }
+            }
+        });
+
+        add(new JLabel("Seleziona Utente:"));
+        add(utentiComboBox);
+        add(confermaButton);
+    }
+
+    private void chiediNumeroMicrorobot(Utente utenteSelezionato) {
+        String numRobotString = JOptionPane.showInputDialog(frame,
+                "Inserisci il numero di microrobot (1-10):",
+                "Impostazioni Partita",
+                JOptionPane.QUESTION_MESSAGE);
+
+        try {
+            int numMicrorobot = Integer.parseInt(numRobotString);
+            if (numMicrorobot < 1 || numMicrorobot > 10) {
+                JOptionPane.showMessageDialog(frame,
+                        "Numero di robot non valido. Inserisci un valore tra 1 e 10.",
+                        "Errore",
+                        JOptionPane.ERROR_MESSAGE);
+                chiediNumeroMicrorobot(utenteSelezionato);
+            } else {
+                selezionaDifficolta(utenteSelezionato, numMicrorobot);
+            }
+        } catch (NumberFormatException e) {
+            JOptionPane.showMessageDialog(frame,
+                    "Input non valido. Inserisci un numero intero.",
+                    "Errore",
+                    JOptionPane.ERROR_MESSAGE);
+            chiediNumeroMicrorobot(utenteSelezionato);
+        }
+    }
+
+    private void selezionaDifficolta(Utente utenteSelezionato, int numMicrorobot) {
+        String[] options = {"Facile", "Medio", "Difficile"};
+        int livello = JOptionPane.showOptionDialog(frame,
+                "Seleziona il livello di difficoltà:",
+                "Nuova Partita",
+                JOptionPane.YES_NO_CANCEL_OPTION,
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                options,
+                options[0]);
+
+        String livelloDifficolta = options[livello];
+
+        iniziaNuovaPartita(utenteSelezionato, numMicrorobot, livelloDifficolta);
+    }
+
+    private void iniziaNuovaPartita(Utente utenteSelezionato, int numMicrorobot, String livelloDifficolta) {
+        try {
+            GestioneScenario gestioneScenario = new GestioneScenario();
+
+            int numBotole = 0;
+            int livello = 0;
+            switch (livelloDifficolta) {
+                case "Facile":
+                    numBotole = 3;
+                    livello = 1;
+                    break;
+                case "Medio":
+                    numBotole = 5;
+                    livello = 2;
+                    break;
+                case "Difficile":
+                    numBotole = 7;
+                    livello = 3;
+                    break;
+            }
+
+            ILabirinto labirinto = gestioneScenario.selezionaScenario(livello, numBotole);
+
+            List<Microrobot> microrobot = new ArrayList<>();
+            for (int i = 0; i < numMicrorobot; i++) {
+                microrobot.add(new Microrobot(i + 1, labirinto.getIngressoX(), labirinto.getIngressoY()));
+            }
+            labirinto.getMicrorobot().addAll(microrobot);
+
+            IMovimento movimento = new MovimentoMicrorobot(labirinto);
+            // Usa l'algoritmo Artificial Bee Colony
+            AlgoritmoRicerca algoritmoRicerca = new ArtificialBeeColony(5, 100, 20);
+
+            frame.getContentPane().removeAll();
+            LabirintoPanel labirintoPanel = new LabirintoPanel(labirinto, movimento, algoritmoRicerca, utenteSelezionato, gestioneUtenti, frame, livelloDifficolta, numMicrorobot);
+            frame.getContentPane().add(labirintoPanel);
+            frame.revalidate();
+            frame.repaint();
+        } catch (EccezioniPersonalizzate.EccezioneLabirintoNonValido e) {
+            JOptionPane.showMessageDialog(frame,
+                    "Errore nella creazione del labirinto: " + e.getMessage(),
+                    "Errore",
+                    JOptionPane.ERROR_MESSAGE);
+        }
+    }
+}
+
+class LabirintoPanel extends JPanel {
+    private ILabirinto labirinto;
+    private IMovimento movimento;
+    private AlgoritmoRicerca algoritmoRicerca;
+    private int CELL_SIZE = 30;
+    private Utente utenteCorrente;
+    private GestioneUtenti gestioneUtenti;
+    private JFrame frame;
+    private Timer timer;
+    private long tempoInizio;
+    private int robotAggiunti;
+    private Timer aggiungiRobotTimer;
+    private String livelloDifficolta;
+    private int numMicrorobot;
+
+    public LabirintoPanel(ILabirinto labirinto, IMovimento movimento, AlgoritmoRicerca algoritmoRicerca, Utente utente, GestioneUtenti gestioneUtenti, JFrame frame, String livelloDifficolta, int numMicrorobot) {
+        this.labirinto = labirinto;
+        this.movimento = movimento;
+        this.algoritmoRicerca = algoritmoRicerca;
+        this.utenteCorrente = utente;
+        this.gestioneUtenti = gestioneUtenti;
+        this.frame = frame;
+        this.livelloDifficolta = livelloDifficolta;
+        this.numMicrorobot = numMicrorobot;
+        setPreferredSize(new Dimension(labirinto.getGriglia()[0].length * CELL_SIZE, labirinto.getGriglia().length * CELL_SIZE));
+
+        robotAggiunti = 0;
+        aggiungiRobotTimer = new Timer(2000, new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                if (robotAggiunti < labirinto.getMicrorobot().size()) {
+                    robotAggiunti++;
+                } else {
+                    aggiungiRobotTimer.stop();
+                }
+            }
+        });
+        aggiungiRobotTimer.start();
+
+        tempoInizio = System.currentTimeMillis();
+        timer = new Timer(500, new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                boolean tuttiUsciti = true;
+                for (int i = 0; i < robotAggiunti; i++) {
+                    Microrobot robot = labirinto.getMicrorobot().get(i);
+                    if (!robot.isUscito()) {
+                        tuttiUsciti = false;
+                        List<Direzione> percorso = algoritmoRicerca.trovaPercorso(robot, labirinto);
+                        if (percorso != null && !percorso.isEmpty()) {
+                            try {
+                                movimento.eseguiMossa(robot, percorso.get(0));
+                            } catch (EccezioniPersonalizzate.EccezioneMicrorobotBloccato ex) {
+                                JOptionPane.showMessageDialog(frame,
+                                        "Errore nel movimento del robot: " + ex.getMessage(),
+                                        "Errore",
+                                        JOptionPane.ERROR_MESSAGE);
+                            }
+                            if (labirinto.verificaUscita(robot)) {
+                                robot.setUscito(true);
+                            }
+                        }
+                    }
+                }
+                repaint();
+
+                boolean tuttiRobotAggiuntiUsciti = true;
+                for (int i = 0; i < robotAggiunti; i++) {
+                    if (!labirinto.getMicrorobot().get(i).isUscito()) {
+                        tuttiRobotAggiuntiUsciti = false;
+                        break;
+                    }
+                }
+                if (tuttiRobotAggiuntiUsciti && robotAggiunti == labirinto.getMicrorobot().size()) {
+                    timer.stop();
+                    long tempoFine = System.currentTimeMillis();
+                    long tempoTrascorso = (tempoFine - tempoInizio) / 1000;
+                    registraRisultato((int) tempoTrascorso);
+                    JOptionPane.showMessageDialog(frame,
+                            "Tutti i microrobot hanno raggiunto l'uscita!\nTempo impiegato: " + tempoTrascorso + " secondi",
+                            "Vittoria!",
+                            JOptionPane.INFORMATION_MESSAGE);
+                    frame.getContentPane().removeAll();
+                    frame.getContentPane().add(new SelezionaUtentePanel(frame, gestioneUtenti));
+                    frame.revalidate();
+                    frame.repaint();
+                }
+            }
+        });
+        timer.start();
+    }
+
+    private void registraRisultato(int tempo) {
+        RisultatoPartita risultato = new RisultatoPartita(utenteCorrente, tempo, livelloDifficolta, numMicrorobot);
+        utenteCorrente.aggiungiRisultato(risultato);
+        gestioneUtenti.salvaUtenti();
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        super.paintComponent(g);
+
+        int[][] griglia = labirinto.getGriglia();
+        for (int i = 0; i < griglia.length; i++) {
+            for (int j = 0; j < griglia[i].length; j++) {
+                if (griglia[i][j] == 1) {
+                    g.setColor(Color.BLACK);
+                } else {
+                    g.setColor(Color.WHITE);
+                }
+                g.fillRect(j * CELL_SIZE, i * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+
+                g.setColor(Color.GRAY);
+                g.drawRect(j * CELL_SIZE, i * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+            }
+        }
+
+        g.setColor(Color.GREEN);
+        g.fillRect(labirinto.getIngressoY() * CELL_SIZE, labirinto.getIngressoX() * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+
+        g.setColor(Color.RED);
+        g.fillRect(labirinto.getUscitaY() * CELL_SIZE, labirinto.getUscitaX() * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+
+        for (int i = 0; i < robotAggiunti; i++) {
+            Microrobot robot = labirinto.getMicrorobot().get(i);
+            if (!robot.isUscito()) {
+                g.setColor(Color.BLUE);
+                g.fillOval(robot.getY() * CELL_SIZE, robot.getX() * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+            }
+        }
+
+        for (IBotola botola : labirinto.getBotole()) {
+            g.setColor(Color.YELLOW);
+            g.fillRect(botola.getY() * CELL_SIZE, botola.getX() * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+        }
+    }
+}
+
+class ClassificaPanel extends JPanel {
+    private GestioneUtenti gestioneUtenti;
+    private JFrame frame;
+
+    public ClassificaPanel(JFrame frame, GestioneUtenti gestioneUtenti) {
+        this.frame = frame;
+        this.gestioneUtenti = gestioneUtenti;
+        setLayout(new BorderLayout());
+
+        JTextArea classificaArea = new JTextArea();
+        classificaArea.setEditable(false);
+
+        List<Utente> utentiOrdinati = new ArrayList<>(gestioneUtenti.getUtenti());
+        utentiOrdinati.sort(Comparator.comparing(Utente::getNome));
+
+        for (Utente utente : utentiOrdinati) {
+            classificaArea.append("Utente: " + utente.getNome() + " " + utente.getCognome() + "\n");
+
+            List<RisultatoPartita> risultatiOrdinati = new ArrayList<>(utente.getRisultati());
+            risultatiOrdinati.sort(Comparator
+                    .comparing(RisultatoPartita::getLivelloDifficolta)
+                    .reversed()
+                    .thenComparing(RisultatoPartita::getTempo));
+
+            for (RisultatoPartita risultato : risultatiOrdinati) {
+                classificaArea.append("  " + risultato + "\n");
+            }
+        }
+
+        JScrollPane scrollPane = new JScrollPane(classificaArea);
+        add(scrollPane, BorderLayout.CENTER);
+
+        JButton backButton = new JButton("Torna al Menu");
+        backButton.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                frame.getContentPane().removeAll();
+                frame.getContentPane().add(new MenuPanel(frame));
+                frame.revalidate();
+                frame.repaint();
+            }
+        });
+        add(backButton, BorderLayout.SOUTH);
+    }
+}
+
+// 12. GestioneScenario
+interface LabirintoFactory {
+    ILabirinto creaLabirinto(int livello, int numBotole) throws EccezioniPersonalizzate.EccezioneLabirintoNonValido;
+}
+
+class LabirintoFacileFactory implements LabirintoFactory {
+    @Override
+    public ILabirinto creaLabirinto(int livello, int numBotole) throws EccezioniPersonalizzate.EccezioneLabirintoNonValido {
+        ILabirinto labirinto = new Labirinto(15, 15, numBotole);
+        labirinto.inizializzaScenario(livello);
+        return labirinto;
+    }
+}
+
+class LabirintoMedioFactory implements LabirintoFactory {
+    @Override
+    public ILabirinto creaLabirinto(int livello, int numBotole) throws EccezioniPersonalizzate.EccezioneLabirintoNonValido {
+        ILabirinto labirinto = new Labirinto(20, 20, numBotole);
+        labirinto.inizializzaScenario(livello);
+        return labirinto;
+    }
+}
+
+class LabirintoDifficileFactory implements LabirintoFactory {
+    @Override
+    public ILabirinto creaLabirinto(int livello, int numBotole) throws EccezioniPersonalizzate.EccezioneLabirintoNonValido {
+        ILabirinto labirinto = new Labirinto(25, 25, numBotole);
+        labirinto.inizializzaScenario(livello);
+        return labirinto;
+    }
+}
+
+class GestioneScenario implements Serializable {
+
+    private ILabirinto scenarioCorrente;
+    private ILabirinto scenarioPrecedente;
+
+    public GestioneScenario() {
+        this.scenarioPrecedente = null;
+    }
+
+    public ILabirinto selezionaScenario(int livello, int numBotole) throws EccezioniPersonalizzate.EccezioneLabirintoNonValido {
+        LabirintoFactory factory = null;
+        switch (livello) {
+            case 1:
+                factory = new LabirintoFacileFactory();
+                break;
+            case 2:
+                factory = new LabirintoMedioFactory();
+                break;
+            case 3:
+                factory = new LabirintoDifficileFactory();
+                break;
+            default:
+                throw new IllegalArgumentException("Livello non valido.");
+        }
+
+        scenarioPrecedente = scenarioCorrente;
+        scenarioCorrente = factory.creaLabirinto(livello, numBotole);
+        System.out.println("Scenario di livello " + livello + " selezionato con " + numBotole + " botole.");
+        return scenarioCorrente;
+    }
+
+    public void ripristinaScenario() {
+        if (scenarioPrecedente != null) {
+            ILabirinto temp = scenarioCorrente;
+            scenarioCorrente = scenarioPrecedente;
+            scenarioPrecedente = temp;
+            System.out.println("Scenario ripristinato allo stato precedente.");
+        } else {
+            System.out.println("Nessuno scenario precedente disponibile.");
+        }
+    }
+
+    public ILabirinto getScenarioCorrente() {
+        return scenarioCorrente;
+    }
+}
+
+// 13. GestioneFile
+class GestioneFile<T> {
+    private String percorso;
+
+    public GestioneFile(String percorso) {
+        this.percorso = percorso;
+    }
+
+    public void salvaSuFile(T dati) {
+        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(percorso))) {
+            oos.writeObject(dati);
+        } catch (IOException e) {
+            throw new RuntimeException("Errore durante il salvataggio dei dati: " + e.getMessage(), e);
+        }
+    }
+
+    public T caricaDaFile() {
+        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(percorso))) {
+            return (T) ois.readObject();
+        } catch (FileNotFoundException e) {
+            System.err.println("File non trovato: " + percorso);
+        } catch (IOException | ClassNotFoundException e) {
+            System.err.println("Errore durante il caricamento dei dati: " + e.getMessage());
+        }
+        return null;
+    }
+}
+
+// 14. EccezioniPersonalizzate
+class EccezioniPersonalizzate {
+
+    public static class EccezioneLabirintoNonValido extends Exception {
+        public EccezioneLabirintoNonValido(String messaggio) {
+            super(messaggio);
+        }
+    }
+
+    public static class EccezioneMicrorobotBloccato extends Exception {
+        public EccezioneMicrorobotBloccato(String messaggio) {
+            super(messaggio);
+        }
+    }
+}
